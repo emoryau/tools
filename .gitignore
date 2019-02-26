@@ -102,3 +102,10 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+.idea
+.vscode
+Ruby24-x64
+apache-maven
+jsoup-test
+*.iml
