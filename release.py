@@ -1,28 +1,43 @@
 from jira import JIRA
 import tkinter
 import webbrowser
-import xml.etree.ElementTree as xml
+import xml.etree.ElementTree as ET
 import subprocess
 import argparse
 import sys
 import os
 
 jira_server = 'https://localedge.atlassian.net'
-
-# Extract from POM
-pom = xml.parse('pom.xml')
-nsmap = {'m': 'http://maven.apache.org/POM/4.0.0'}
-raw_version = pom.find('m:version', nsmap)
-raw_group = pom.find('m:groupId', nsmap)
-raw_artifact = pom.find('m:artifactId', nsmap)
+jira_user = 'eau@localedge.com'
+jira_token = 'fh3MuTo1fyLJ0Rair3uY3CFB'
 
 component = os.path.relpath('.', '..').lower()
-maven_dependency = ('<dependency>\r\n'
-                    '\t<groupId>' + raw_group.text + '</groupid>\r\n'
-                    '\t<artifactId>' + raw_artifact.text + '</artifactId>\r\n'
-                    '\t<version>' + raw_version.text + '</version>\r\n'
-                    '</dependency>')
-split_version = raw_version.text.split('.')
+
+# Extract from POM
+if (os.path.exists('pom.xml')):
+    pom = ET.parse('pom.xml')
+    nsmap = {'m': 'http://maven.apache.org/POM/4.0.0'}
+    raw_version = pom.find('m:version',nsmap).text
+    raw_group = pom.find('m:groupId', nsmap).text
+    raw_artifact = pom.find('m:artifactId', nsmap).text
+
+    maven_dependency = ('<dependency>\r\n'
+                        '\t<groupId>' + raw_group + '</groupid>\r\n'
+                        '\t<artifactId>' + raw_artifact + '</artifactId>\r\n'
+                        '\t<version>' + raw_version + '</version>\r\n'
+                        '</dependency>')
+elif (os.path.exists('docker-image-version.txt')):
+    # No maven dependency on this release ticket
+    maven_dependency = ''
+
+    # Try load version from file
+    with open('docker-image-version.txt', 'r') as file:
+        raw_version = file.read().replace('\n', '')
+else:
+    print('Could not find compatible version source')
+    exit()
+
+split_version = raw_version.split('.')
 majorVersion = int(split_version[0])
 minorVersion = int(split_version[1])
 raw_patch = split_version[2].split('-')
@@ -62,6 +77,9 @@ def AddLabel(root, name, text, height=1):
     return text_label
 
 def CreateIssue():
+    #Start JIRA
+    jira_client = JIRA(server=jira_server, basic_auth=(jira_user, jira_token))
+
     issue_dict = {
         'project': 'REL',
         'issuetype': {'name': 'Release'},
@@ -78,7 +96,8 @@ def CreateIssue():
 
     link = link_label.get('1.0', tkinter.END + '-1c')
     if link != '':
-        jira_client.create_issue_link('Relates', new_issue.key, link)
+        for single_link in link.split('/'):
+            jira_client.create_issue_link('Relates', new_issue.key, single_link)
 
     webbrowser.open_new_tab(ConstructJiraLink(new_issue.key))
     return new_issue
@@ -90,6 +109,7 @@ def OpenLink(event):
     link = link_label.get('1.0', tkinter.END + '-1c')
     webbrowser.open_new_tab(ConstructJiraLink(link))
 
+# Commenting out TK for now, UI is more trouble than it's worth
 root = tkinter.Tk()
 root.title('JIRA Release Generator')
 
@@ -101,11 +121,9 @@ AddLabel(root, 'Maven Dependency', maven_dependency.replace('\r',''), 5)
 link_label = AddLabel(root, 'Link', link)
 link_label.bind('<Double-Button-1>', OpenLink)
 
-tkinter.Button(root, command=exit, text='Close').pack(side = tkinter.LEFT)
-tkinter.Button(root, command=CreateIssue, text='Create').pack(side = tkinter.RIGHT)
+# tkinter.Button(root, command=exit, text='Close').pack(side = tkinter.LEFT)
+# tkinter.Button(root, command=CreateIssue, text='Create').pack(side = tkinter.RIGHT)
+#
+# root.mainloop()
 
-
-#Start JIRA
-jira_client = JIRA(server=jira_server, basic_auth=('eau', 'b423u8b*'))
-
-root.mainloop()
+CreateIssue();

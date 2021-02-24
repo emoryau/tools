@@ -15,10 +15,13 @@ parser = argparse.ArgumentParser(description="Code Collaborator review generator
 parser.add_argument('-r', '--revisions', help='Hashcode revisions to use for diff', required=False, type=str)
 parser.add_argument('-i', '--id', help='Specify code review id (for updating existing reviews)', required=False, type=str)
 parser.add_argument('-m', '--allow-modified', action='store_true', help='Skip check for modifications that have not been checked in')
+parser.add_argument('-1', '--last', help="diff last revision only", required=False)
 args = parser.parse_args()
 
 def get_diff_arg_string():
-    if args.revisions is None:
+    if args.last is not None:
+        revision_hash = '-2:-1'
+    elif args.revisions is None:
         hg_pipe = subprocess.Popen(['hg', 'id', '-i', '-r', 'parents(min(branch(.)))'], stdout=subprocess.PIPE)
         starting_hash = hg_pipe.stdout.read().decode('utf-8').rstrip('\r\n')
 
@@ -63,14 +66,14 @@ pyperclip.copy(diff_arg_string)
 try:
     review_id = 0
     if args.id is None:
-        out = subprocess.check_output(['ccollab', '--no-browser', '--password', password, 'admin', 'review', 'create', '--title', review_name, '--custom-field', 'Jira issue link=%s' % (ConstructJiraLink(get_branchname()))])
+        out = subprocess.check_output(['ccollab.exe', '--no-browser', '--password', password, 'admin', 'review', 'create', '--title', review_name, '--custom-field', 'Jira issue link=%s' % (ConstructJiraLink(get_branchname()))])
         review_regex = re.compile(r"review (\d*)\.")
         review_id = review_regex.search(out.decode('UTF-8')).group(1)
-        subprocess.check_output(['ccollab', '--password', password, 'admin', 'review', 'participant', 'assign', review_id, username, 'Author'])
+        subprocess.check_output(['ccollab.exe', '--password', password, 'admin', 'review', 'participant', 'assign', review_id, username, 'Author'])
     else:
         review_id = args.id
-    print(str.format('ccollab --no-browser --password {} addhgdiffs {} -w -B -r {}', password, review_id, revision_hash))
-    subprocess.check_output(['ccollab', '--no-browser', '--password', password, 'addhgdiffs', review_id, '-w', '-B', '-r', revision_hash])
+    print(str.format('ccollab.exe --no-browser --password {} addhgdiffs {} -w -B -r {}', password, review_id, revision_hash))
+    subprocess.check_output(['ccollab.exe', '--no-browser', '--password', password, 'addhgdiffs', review_id, '-w', '-B', '-r', revision_hash])
 
 except subprocess.CalledProcessError as e:
     print (e)

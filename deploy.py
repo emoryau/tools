@@ -10,14 +10,20 @@ from prompt_toolkit.contrib.completers import WordCompleter
 import datetime
 
 jira_server = 'https://localedge.atlassian.net'
-wiki_base = r'http://localedge.atlassian.com/wiki'
+jira_user = 'eau@localedge.com'
+jira_token = 'fh3MuTo1fyLJ0Rair3uY3CFB'
+jira_account_id_me = '557058:b7f59859-6ada-41e7-a52f-fb857e8dd9f9'
+jira_account_id_po = '557058:d6724e93-fbeb-4cc7-b374-513975bac670'
+
+wiki_base = r''
 hg_base = r'http://vcs.localedge.com/hg'
-deploy_folder_base = r'\\LEBFS02\IT_Product\DEV\Deployment\Java\Single-Build'
-deploy_static_folder_base = r'\\LEBFS02\IT_Product\DEV\Deployment\Java'
+jenkins_base = r'http://jenkins.localedge.com'
+deploy_folder_base = r'\\lebfs01.wdp1.white-directory.com\docs\IT_Product\DEV\Deployment\Java\Single-Build'
+deploy_static_folder_base = r'\\lebfs01.wdp1.white-directory.com\docs\IT_Product\DEV\Deployment\Java'
 dev_process_server = 'lecdazrps01'
 qa_process_server = 'lecqazrps01'
 stage_process_server = 'lecsazrps01'
-prod_process_server = 'lecawsps01'
+prod_process_server = 'lecazrps01'
 environments = dict()
 environments['dev'] = dict(process_server='lecdazrps01', admin_name='DEV', server_environment='Development',
                            should_have_snapshot=True, static_dir='Development')
@@ -25,14 +31,25 @@ environments['qa'] = dict(process_server='lecqazrps01', admin_name='QA', server_
                           should_have_snapshot=True, static_dir='QA')
 environments['stage'] = dict(process_server='lecsazrps01', admin_name='STAGING', server_environment='Staging',
                              should_have_snapshot=False, static_dir='Staging-UAT')
-environments['prod'] = dict(process_server='lecawsps01', admin_name='PRODUCTION', server_environment='Production',
+environments['prod'] = dict(process_server='lecazrps01', admin_name='PRODUCTION', server_environment='Production',
                             should_have_snapshot=False, static_dir='Production')
 
 
 # Extract from POM
-def extract_artifact_version(pom, nsmap):
-    raw_version = pom.find('m:version', nsmap)
-    split_version = raw_version.text.split('.')
+def extract_artifact_version(pom, nsmap, version_override):
+    if (version_override != ''):
+        raw_version = version_override
+    elif (pom != None):
+        raw_version = pom.find('m:version', nsmap).text
+    elif (os.path.exists('docker-image-version.txt')):
+        # Try load version from file
+        with open('docker-image-version.txt', 'r') as file:
+            raw_version = file.read().replace('\n', '')
+    else:
+        print('Could not find compatible version source')
+        exit()
+
+    split_version = raw_version.split('.')
     raw_patch = split_version[2].split('-')
     majorVersion = int(split_version[0])
     minorVersion = int(split_version[1])
@@ -40,7 +57,7 @@ def extract_artifact_version(pom, nsmap):
     snapshot = ''
     if len(raw_patch) > 1:
         snapshot = raw_patch[1]
-    return majorVersion, minorVersion, patchVersion, snapshot, raw_version.text
+    return majorVersion, minorVersion, patchVersion, snapshot, raw_version
 
 
 def extract_group_and_artifact(pom, nsmap):
@@ -50,6 +67,8 @@ def extract_group_and_artifact(pom, nsmap):
 
 
 def extract_packaging(pom, nsmap):
+    if (pom == None):
+        return 'None'
     raw_packaging = pom.find('m:packaging', nsmap)
     return raw_packaging.text
 
@@ -83,18 +102,29 @@ def extract_hg_branchname():
         return ''
 
 
+
 # Argument Parsing
 parser = argparse.ArgumentParser(description='Create JIRA Deployment tickets')
 parser.add_argument('-s', '--server', help=str.format('Server environment to use {}', list(environments.keys())),
                     action='append', required=True, type=str)
 parser.add_argument('-w', '--wiki', help='Wiki article to link', dest='wiki_link', default='')
 parser.add_argument('-a', '--additional-instructions', help='Additional instructions to specify', default='')
-parser.add_argument('artifact', help='filename of artifact to deploy')
+parser.add_argument('-j', '--jobid', help='Jenkins pipeline job id', dest='jenkins_job_id', default='')
+parser.add_argument('-v', '--version', help='Artifact Version', dest='version_override', default='')
+parser.add_argument('artifact', help='filename of artifact to deploy, or - to build site.zip')
 args = parser.parse_args()
-print(args.server)
 
-pom = xml.parse('pom.xml')
+if (os.path.exists('pom.xml')):
+    pom = xml.parse('pom.xml')
+elif (os.path.exists('docker-image-version.txt')):
+    pom = None
+    # Try load version from file
+    with open('docker-image-version.txt', 'r') as file:
+        raw_version = file.read().replace('\n', '')
+else:
+    pom = None
 nsmap = {'m': 'http://maven.apache.org/POM/4.0.0'}
+
 component = os.path.relpath('.', '..')
 
 
@@ -131,13 +161,18 @@ def ConstructJiraLink(issue_key):
         return ''
 
 
-def CreateIssue(summary, description, link, server_environment, due_date):
+def CreateIssue(summary, description, link, server_environment, due_date, is_container):
+    container_value = 'No'
+    if is_container == True:
+        container_value = 'Yes'
+
     issue_dict = {
         'project': 'DEPLOY',
         'issuetype': {'name': 'Deployment'},
         'summary': summary,
         'description': description,
         'customfield_11000': {'value': server_environment},
+        'customfield_13707': {'value': container_value},
         'duedate': due_date.isoformat()
     }
     new_issue = jira_client.create_issue(fields=issue_dict)
@@ -148,6 +183,12 @@ def CreateIssue(summary, description, link, server_environment, due_date):
             jira_client.create_issue_link('Relates', new_issue.key, link)
     except Exception as e:
         print(str.format('Failed to link issue {} because:\n{}', link, e))
+
+    try:
+        if is_container:
+            jira_client.assign_issue(new_issue.key, account_id = jira_account_id_me)
+    except Exception as e:
+        print(str.format('Failed to assign issue {} because:\n{}', link, e))
 
     webbrowser.open_new_tab(ConstructJiraLink(new_issue.key))
 
@@ -167,7 +208,7 @@ def construct_cron_table(component, version, wiki_link, schedule, server, additi
     table += construct_wikitable_row('Additional Configuration', additional_configuration)
     table += construct_wikitable_row('Source Control Revision', str.format('[{}]', extract_hg_link()))
     table += '{panel}\n'
-    table += 'FYI [~rfisher] [~mmckane] [~justinmoore]'
+    table += 'FYI [~mmckane] [~justinmoore]'
 
     return table
 
@@ -177,12 +218,12 @@ def construct_war_table(component, version, wiki_link, additional_configuration)
     table += construct_wikitable_head('', '')
     table += construct_wikitable_row('Wiki Link', str.format('[{}]', wiki_link))
     table += construct_wikitable_row('WAR', construct_deploy_folder(component, version,
-                                                                    environments[args.server[0]]['static_dir']))
+                                                                environments[args.server[0]]['static_dir']))
     table += construct_wikitable_row('Version #', version)
     table += construct_wikitable_row('Additional Configuration', additional_configuration)
     table += construct_wikitable_row('Source Control Revision', str.format('[{}]', extract_hg_link()))
     table += '{panel}\n'
-    table += 'FYI [~rfisher] [~mmckane] [~justinmoore]'
+    table += 'FYI [~mmckane] [~justinmoore]'
 
     return table
 
@@ -194,10 +235,28 @@ def construct_static_content_table(component, environment, additional_configurat
     table += construct_wikitable_row('Additional Configuration', additional_configuration)
     table += construct_wikitable_row('Source Control Revision', str.format('[{}]', extract_hg_link()))
     table += '{panel}\n'
-    table += 'FYI [~rfisher] [~mmckane] [~justinmoore]'
+    table += 'FYI [~mmckane] [~justinmoore]'
 
     return table
 
+def construct_pipeline_table(component, version, wiki_link, additional_configuration, jenkins_job_id):
+    table = '{panel:title=Static Content Deployment|borderStyle=dashed|borderColor=#ccc|titleBGColor=#F7D6C1|bgColor=#FFFFCE}'
+    table += construct_wikitable_head('', '')
+    table += construct_wikitable_row('Docs', wiki_link)
+    table += construct_wikitable_row('Pipeline', construct_pipeline_link(component, jenkins_job_id))
+    table += construct_wikitable_row('Version #', version)
+    table += construct_wikitable_row('Additional Configuration', additional_configuration)
+    table += construct_wikitable_row('VCS Revision', str.format('[{}]', extract_hg_link()))
+    table += '{panel}\n'
+    table += 'FYI [~mmckane] [~justinmoore]'
+
+    return table
+
+def construct_pipeline_link(component, jenkins_job_id):
+    return jenkins_base + '/job/' + component + '-pipeline/' + jenkins_job_id
+
+def create_static_content_zip():
+    os.system(' cd target & 7z a site.zip site & cd ..')
 
 def copy_artifact(artifact_filename, component, version, environment):
     target_folder = construct_deploy_folder(component, version, environment)
@@ -221,7 +280,7 @@ def check_snapshot(snapshot, environment):
             exit(1)
 
 
-major_version, minor_version, patch_version, snapshot, full_version = extract_artifact_version(pom, nsmap)
+major_version, minor_version, patch_version, snapshot, full_version = extract_artifact_version(pom, nsmap, args.version_override)
 packaging = extract_packaging(pom, nsmap)
 branchname = extract_hg_branchname()
 static_content = False
@@ -244,29 +303,41 @@ if 'prod' in args.server:
     else:
         due_date += datetime.timedelta(days=1)
 
+is_container = False
+
+# Detect static content
+if component == 'static-content':
+    static_content = True
+
 if args.wiki_link == '':
     wiki_link = extract_url(pom, nsmap)
-    if wiki_link == '':
+    if wiki_link == '' and not static_content:
         print(str.format('You must include <url> tag in pom or specify -w wiki link in command'))
         exit(1)
 else:
     # Wiki link specified on command line - add wiki base
     wiki_link = str.format('{}/{}', wiki_base, args.wiki_link)
 
-if str.lower(packaging) == 'war':
+if static_content:
+    table = construct_static_content_table(component, environments[args.server[0]]['static_dir'],
+                                           args.additional_instructions)
+elif args.jenkins_job_id != '':
+    table = construct_pipeline_table(component, full_version, wiki_link, args.additional_instructions, args.jenkins_job_id)
+elif str.lower(packaging) == 'war':
     table = construct_war_table(component, full_version, wiki_link, args.additional_instructions)
+    is_container = True
 elif str.lower(packaging) == 'jar':
     table = construct_cron_table(component, full_version, wiki_link, '(unchanged)', server,
                                  args.additional_instructions)
-elif str.lower(packaging) == 'pom':
-    static_content = True
-    table = construct_static_content_table(component, environments[args.server[0]]['static_dir'],
-                                           args.additional_instructions)
 
 # Start JIRA
-jira_client = JIRA(server=jira_server, basic_auth=('eau', 'b423u8b*'))
+jira_client = JIRA(server=jira_server, basic_auth=(jira_user, jira_token))
 
-commands = ['create', 'skip-copy', 'exit']
+if (args.jenkins_job_id != ''):
+    # pipeline tasks do not have a copy step
+    commands = ['skip-copy', 'exit']
+else:
+    commands = ['create', 'skip-copy', 'exit']
 CommandCompleter = WordCompleter(commands, ignore_case=True)
 
 print('\n')
@@ -281,6 +352,9 @@ while 1:
         exit()
 
     if user_input == 'create':
+        if static_content and args.artifact == '-':
+            create_static_content_zip()
+            args.artifact='target\\site.zip'
         copy_artifact(args.artifact, component, full_version, environments[args.server[0]]['static_dir'])
 
     # Create Deployment Ticket
@@ -293,6 +367,6 @@ while 1:
             print(description)
 
             deploy_issue = CreateIssue(summary, description, branchname, environments[server_arg]['server_environment'],
-                                       due_date)
+                                       due_date, is_container)
 
         exit()
