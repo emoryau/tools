@@ -11,9 +11,9 @@ IF "%1" == "dev" (
 ) ELSE IF  "%1" == "stg" (
 	kubectl config use-context lecsazrkube02
 ) ELSE IF  "%1" == "prod" (
-	kubectl config use-context lecazrkube02
+	kubectl config use-context lecazrkube01
 ) ELSE IF  "%1" == "production" (
-	kubectl config use-context lecazrkube02
+	kubectl config use-context lecazrkube01
 ) ELSE (
 	echo "Unexpected environment %1"
 	EXIT /B 1

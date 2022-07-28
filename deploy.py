@@ -8,18 +8,28 @@ from jira import JIRA
 from prompt_toolkit import prompt
 from prompt_toolkit.contrib.completers import WordCompleter
 import datetime
+import json
+import pyperclip
+from pyadf.document import Document
+from pyadf.paragraph import Paragraph
 
+
+# jira_server = 'https://emcomplete.atlassian.net'
+# jira_user = 'emoryau@gmail.com'
+# jira_token = 'O30SE83e4IcTl4lw2GTY2F8F'
 jira_server = 'https://localedge.atlassian.net'
 jira_user = 'eau@localedge.com'
 jira_token = 'fh3MuTo1fyLJ0Rair3uY3CFB'
-jira_account_id_me = '557058:b7f59859-6ada-41e7-a52f-fb857e8dd9f9'
-jira_account_id_po = '557058:d6724e93-fbeb-4cc7-b374-513975bac670'
+jira_account_id_me = '557058:b7f59859-6ada-41e7-a52f-fb857e8dd9f9'  # @localedge
+jira_account_id_po = '557058:d6724e93-fbeb-4cc7-b374-513975bac670'  # glenn
+#jira_account_mentions = ['557058:b7f59859-6ada-41e7-a52f-fb857e8dd9f9','557058:fe76b216-dd2b-4fb6-bfa9-898d83c6712f']  # localedge & personal
+jira_account_mentions = ['557058:7e28aa77-6187-4569-9c14-bd90c7ae2272']  # mckane & justin
 
 wiki_base = r''
 hg_base = r'http://vcs.localedge.com/hg'
 jenkins_base = r'http://jenkins.localedge.com'
-deploy_folder_base = r'\\lebfs01.wdp1.white-directory.com\docs\IT_Product\DEV\Deployment\Java\Single-Build'
-deploy_static_folder_base = r'\\lebfs01.wdp1.white-directory.com\docs\IT_Product\DEV\Deployment\Java'
+deploy_folder_base = r'\\lebfs01.wdp1.white-directory.com\docs\IT_Product\DEV/Deployment\Java\Single-Build'
+deploy_static_folder_base = r'file://lebfs01.wdp1.white-directory.com/docs/IT_Product/DEV/Deployment/Java'
 dev_process_server = 'lecdazrps01'
 qa_process_server = 'lecqazrps01'
 stage_process_server = 'lecsazrps01'
@@ -171,9 +181,9 @@ def CreateIssue(summary, description, link, server_environment, due_date, is_con
         'issuetype': {'name': 'Deployment'},
         'summary': summary,
         'description': description,
-        'customfield_11000': {'value': server_environment},
-        'customfield_13707': {'value': container_value},
-        'duedate': due_date.isoformat()
+        # 'customfield_11000': {'value': server_environment},
+        # 'customfield_13707': {'value': container_value},
+        # 'duedate': due_date.isoformat()
     }
     new_issue = jira_client.create_issue(fields=issue_dict)
     print(str.format('New issue created: {}', ConstructJiraLink(new_issue.key)))
@@ -186,7 +196,7 @@ def CreateIssue(summary, description, link, server_environment, due_date, is_con
 
     try:
         if is_container:
-            jira_client.assign_issue(new_issue.key, account_id = jira_account_id_me)
+            jira_client.assign_issue(new_issue.key, account_id=jira_account_id_me)
     except Exception as e:
         print(str.format('Failed to assign issue {} because:\n{}', link, e))
 
@@ -196,36 +206,88 @@ def CreateIssue(summary, description, link, server_environment, due_date, is_con
 
 
 def construct_cron_table(component, version, wiki_link, schedule, server, additional_configuration):
-    table = '{panel:title=Automated Process (cron) Deployment|borderStyle=dashed|borderColor=#ccc|titleBGColor=#F7D6C1|bgColor=#FFFFCE}'
-    table += construct_wikitable_head('', '')
-    table += construct_wikitable_row('Wiki Link', str.format('[{}]', wiki_link))
-    table += construct_wikitable_row('Version #', version)
-    table += construct_wikitable_row('Deployment Artifacts', construct_deploy_folder(component, version,
-                                                                                     environments[args.server[0]][
-                                                                                         'static_dir']))
-    table += construct_wikitable_row('Schedule', schedule)
-    table += construct_wikitable_row('Server', server)
-    table += construct_wikitable_row('Additional Configuration', additional_configuration)
-    table += construct_wikitable_row('Source Control Revision', str.format('[{}]', extract_hg_link()))
-    table += '{panel}\n'
-    table += 'FYI [~mmckane] [~justinmoore]'
+    if additional_configuration == '':
+        additional_configuration = ' '
+    hg_link = extract_hg_link()
 
-    return table
+    jdoc = Document() \
+        .table() \
+        .tablerow() \
+        .tableheader().paragraph().text('Wiki Link').end().end() \
+        .tablecell().paragraph().text('Confluence').link(wiki_link).end().end() \
+        .end() \
+        .tablerow() \
+        .tableheader().paragraph().text('Version #').end().end() \
+        .tablecell().paragraph().text(version).end().end() \
+        .end() \
+        .tablerow() \
+        .tableheader().paragraph().text('Deployment Artifacts').end().end() \
+        .tablecell().paragraph().text(construct_deploy_folder(component, version,
+                                                              environments[args.server[0]]['static_dir'])).end().end() \
+        .end() \
+        .tablerow() \
+        .tableheader().paragraph().text('Schedule').end().end() \
+        .tablecell().paragraph().text(schedule).end().end() \
+        .end() \
+        .tablerow() \
+        .tableheader().paragraph().text('Server').end().end() \
+        .tablecell().paragraph().text(server).end().end() \
+        .end() \
+        .tablerow() \
+        .tableheader().paragraph().text('Additional Configuration').end().end() \
+        .tablecell().paragraph().text(additional_configuration).end().end() \
+        .end() \
+        .tablerow() \
+        .tableheader().paragraph().text('VCS Revision').end().end() \
+        .tablecell().paragraph().text(hg_link).link(hg_link).end().end() \
+        .end() \
+        .end() \
+        .paragraph() \
+        .text('FYI ') \
+        .mention(mention_id=jira_account_mentions[0], mention_text=jira_account_mentions[0]) \
+        .end() \
+        .to_doc()
+
+    return jdoc['body']
 
 
 def construct_war_table(component, version, wiki_link, additional_configuration):
-    table = '{panel:title=Web Application Deployment|borderStyle=dashed|borderColor=#ccc|titleBGColor=#F7D6C1|bgColor=#FFFFCE}'
-    table += construct_wikitable_head('', '')
-    table += construct_wikitable_row('Wiki Link', str.format('[{}]', wiki_link))
-    table += construct_wikitable_row('WAR', construct_deploy_folder(component, version,
-                                                                environments[args.server[0]]['static_dir']))
-    table += construct_wikitable_row('Version #', version)
-    table += construct_wikitable_row('Additional Configuration', additional_configuration)
-    table += construct_wikitable_row('Source Control Revision', str.format('[{}]', extract_hg_link()))
-    table += '{panel}\n'
-    table += 'FYI [~mmckane] [~justinmoore]'
+    if additional_configuration == '':
+        additional_configuration = ' '
+    hg_link = extract_hg_link()
 
-    return table
+    jdoc = Document() \
+        .table() \
+        .tablerow() \
+        .tableheader().paragraph().text('Wiki Link').end().end() \
+        .tablecell().paragraph().text('Confluence').link(wiki_link).end().end() \
+        .end() \
+        .tablerow() \
+        .tableheader().paragraph().text('WAR').end().end() \
+        .tablecell().paragraph().text(construct_deploy_folder(component, version,
+                                                              environments[args.server[0]]['static_dir'])).end().end() \
+        .end() \
+        .tablerow() \
+        .tableheader().paragraph().text('Version #').end().end() \
+        .tablecell().paragraph().text(version).end().end() \
+        .end() \
+        .tablerow() \
+        .tableheader().paragraph().text('Additional Configuration').end().end() \
+        .tablecell().paragraph().text(additional_configuration).end().end() \
+        .end() \
+        .tablerow() \
+        .tableheader().paragraph().text('VCS Revision').end().end() \
+        .tablecell().paragraph().text(hg_link).link(hg_link).end().end() \
+        .end() \
+        .end() \
+        .paragraph() \
+        .text('FYI ') \
+        .mention(mention_id=jira_account_mentions[0], mention_text=jira_account_mentions[0]) \
+        .mention(mention_id=jira_account_mentions[1], mention_text=jira_account_mentions[1]) \
+        .end() \
+        .to_doc()
+
+    return jdoc['body']
 
 
 def construct_static_content_table(component, environment, additional_configuration):
@@ -239,18 +301,49 @@ def construct_static_content_table(component, environment, additional_configurat
 
     return table
 
-def construct_pipeline_table(component, version, wiki_link, additional_configuration, jenkins_job_id):
-    table = '{panel:title=Static Content Deployment|borderStyle=dashed|borderColor=#ccc|titleBGColor=#F7D6C1|bgColor=#FFFFCE}'
-    table += construct_wikitable_head('', '')
-    table += construct_wikitable_row('Docs', wiki_link)
-    table += construct_wikitable_row('Pipeline', construct_pipeline_link(component, jenkins_job_id))
-    table += construct_wikitable_row('Version #', version)
-    table += construct_wikitable_row('Additional Configuration', additional_configuration)
-    table += construct_wikitable_row('VCS Revision', str.format('[{}]', extract_hg_link()))
-    table += '{panel}\n'
-    table += 'FYI [~mmckane] [~justinmoore]'
+def jira_mentions():
+    p = Paragraph()
+    for id in jira_account_mentions:
+        node = node.mention(id)
 
-    return table
+    return node
+
+def construct_pipeline_table(component, version, wiki_link, additional_configuration, jenkins_job_id):
+    if additional_configuration == '':
+        additional_configuration = ' '
+    hg_link = extract_hg_link()
+
+    jdoc = Document() \
+        .table() \
+            .tablerow() \
+                .tableheader().paragraph().text('Docs').end().end() \
+                .tablecell().paragraph().text('Confluence').link(wiki_link).end().end() \
+            .end() \
+            .tablerow() \
+                .tableheader().paragraph().text('Pipeline').end().end() \
+                .tablecell().paragraph().text('Jenkins').link(construct_pipeline_link(component, jenkins_job_id)).end().end() \
+            .end() \
+            .tablerow() \
+                .tableheader().paragraph().text('Version #').end().end() \
+                .tablecell().paragraph().text(version).end().end() \
+            .end() \
+            .tablerow() \
+                .tableheader().paragraph().text('Additional Configuration').end().end() \
+                .tablecell().paragraph().text(additional_configuration).end().end() \
+            .end() \
+            .tablerow() \
+                .tableheader().paragraph().text('VCS Revision').end().end() \
+                .tablecell().paragraph().text(hg_link).link(hg_link).end().end() \
+            .end() \
+        .end() \
+        .paragraph() \
+            .text('FYI ') \
+            .mention(mention_id=jira_account_mentions[0], mention_text=jira_account_mentions[0]) \
+            .mention(mention_id=jira_account_mentions[1], mention_text=jira_account_mentions[1]) \
+        .end() \
+        .to_doc()
+
+    return jdoc['body']
 
 def construct_pipeline_link(component, jenkins_job_id):
     return jenkins_base + '/job/' + component + '-pipeline/' + jenkins_job_id
@@ -260,9 +353,9 @@ def create_static_content_zip():
 
 def copy_artifact(artifact_filename, component, version, environment):
     target_folder = construct_deploy_folder(component, version, environment)
+    print(str.format('Copying {} to {}', artifact_filename, target_folder))
     if not os.path.exists(target_folder):
         os.makedirs(target_folder)
-    print(str.format('Copying {} to {}', artifact_filename, target_folder))
     shutil.copy(artifact_filename, target_folder)
     print(str.format('Copy complete'))
 
@@ -315,8 +408,7 @@ if args.wiki_link == '':
         print(str.format('You must include <url> tag in pom or specify -w wiki link in command'))
         exit(1)
 else:
-    # Wiki link specified on command line - add wiki base
-    wiki_link = str.format('{}/{}', wiki_base, args.wiki_link)
+    wiki_link = args.wiki_link
 
 if static_content:
     table = construct_static_content_table(component, environments[args.server[0]]['static_dir'],
@@ -331,7 +423,7 @@ elif str.lower(packaging) == 'jar':
                                  args.additional_instructions)
 
 # Start JIRA
-jira_client = JIRA(server=jira_server, basic_auth=(jira_user, jira_token))
+jira_client = JIRA(server=jira_server, basic_auth=(jira_user, jira_token), options={'rest_api_version': 3})
 
 if (args.jenkins_job_id != ''):
     # pipeline tasks do not have a copy step
@@ -343,6 +435,10 @@ CommandCompleter = WordCompleter(commands, ignore_case=True)
 print('\n')
 print(table)
 print('\n')
+
+# TODO remove this debugging stuff to re-enable normal operation
+pyperclip.copy(json.dumps(table))
+# exit()
 
 while 1:
     print(str.format('Commands: {}', commands))

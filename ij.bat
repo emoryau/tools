@@ -2,7 +2,7 @@
 
 for %%I in (.) do title %%~nxI
 
-for /d %%d in ("c:\tools") do set IDEA="%%d\idea.cmd"
+for /d %%d in (c:\tools) do set IDEA="%%d\idea.cmd"
 
 if exist %CD%\*.iml (
     echo Found project
@@ -12,12 +12,12 @@ if exist %CD%\*.iml (
 
 if exist %CD%\pom.xml (
     echo Found maven pom
-    call :getabsolute %CD%\pom.xml
-    %IDEA% "%absolute%"
+rem    call :getabsolute %CD%\pom.xml
+    %IDEA% pom.xml
     goto :eof
 )
 goto :eof
 
 :getabsolute
-set absolute=%~f1
+set absolute="%~f1"
 goto :eof
